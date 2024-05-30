@@ -21,7 +21,7 @@ russian_to_english_transliteration_dict = {
     'т': 't',
     'у': 'u',
     'ф': 'f',
-    'х': 'kh',
+    'х': 'h',
     'ц': 'ts',
     'ч': 'ch',
     'ш': 'sh',
@@ -32,11 +32,13 @@ russian_to_english_transliteration_dict = {
     'э': 'e',
     'ю': 'yu',
     'я': 'ya',
+    'хай': 'high',
 }
 
 english_to_russian_transliteration_dict = {
     'a': 'а',
     'b': 'б',
+    'c': 'c',
     'v': 'в',
     'g': 'г',
     'd': 'д',
@@ -56,7 +58,7 @@ english_to_russian_transliteration_dict = {
     't': 'т',
     'u': 'у',
     'f': 'ф',
-    'kh': 'х',
+    'h': 'х',
     'ts': 'ц',
     'ch': 'ч',
     'sh': 'ш',

@@ -1,0 +1,27 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Search Page</title>
+</head>
+<body>
+    <h1>Search Page</h1>
+    <form action="/search" method="get" id="searchForm">
+        <input type="text" id="searchInput" name="search" placeholder="Enter search query">
+        <button type="submit">Search</button>
+    </form>
+    <div id="searchResults">
+        {% if results %}
+            <ul>
+            {% for result in results %}
+                <li>Code: {{ result.code }}, Name: {{ result.name }}, Barcode: {{ result.barcode }}, Score: {{ result.Score }}</li>
+            {% endfor %}
+            </ul>
+        {% else %}
+            <p>{{ message }}</p>
+        {% endif %}
+    </div>
+
+</body>
+</html>

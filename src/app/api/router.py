@@ -1,50 +1,82 @@
-from fastapi import APIRouter
-from app.schemas.response import ResponseOut
+from fastapi import APIRouter, Request
+from fastapi.templating import Jinja2Templates
+from fastapi.responses import HTMLResponse, JSONResponse
 from app.database import df
-from app.functions import search_with_fuzzy, convert_layout, transliterate, merge_and_sort_dataframes
+from app.functions import search_with_fuzzy, convert_layout, transliterate, merge_and_sort_dataframes, sort_dataframes, simple_search
 
 
-app = APIRouter(responses={
-        404: {"description": "Not found"}}
-    )
+router = APIRouter()
+templates = Jinja2Templates(directory="app/templates")
 
+@router.get("/", response_class=HTMLResponse)
+async def index(request: Request):
+    return templates.TemplateResponse("index.html", {"request": request})
 
-@app.get("/hello/")
-async def say_hello():
-    ResponseOut(data='ok', message='ok')
-
-
-@app.get("/search/")
-async def search_endpoint(search):
-
+@router.get("/search", response_class=HTMLResponse)
+async def search_endpoint(request: Request, search: str = None):
     if search:
-        search_query = search
+        search_query = search.strip()
+        # print("search query = ", search_query)
     else:
-        ResponseOut(data=[], message='empty field')
+        return templates.TemplateResponse("index.html", {"request": request, "results": None, "message": "Empty field"})
+    
+    # print(simple_search(search_query, df))
 
-    # seach if not a number
+    # Search logic
     if not search_query.isdigit():
-        # different types of input words 
+        zero_df = simple_search(search_query, df)
         first_df = search_with_fuzzy(search_query, df)
         second_df = search_with_fuzzy(convert_layout(search_query), df)
         third_df = search_with_fuzzy(transliterate(search_query), df)
         fourth_df = search_with_fuzzy(transliterate(convert_layout(search_query)), df)
 
-        # join all results
-        result_df = merge_and_sort_dataframes(first_df, second_df, third_df, fourth_df)
-
-    # search if a number 
+        result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df))
     else:
-        search_query = str(int(search_query))  # delete 0 from the beginning
-
-        # search for an input number in 'code', 'name' and 'barcode'
+        search_query = str(int(search_query))
         result_df = df[
             (df['code'].astype(str).str.contains(search_query, case=False, na=False)) |
             (df['name'].astype(str).str.contains(search_query, case=False, na=False)) |
             (df['barcode'].astype(str).str.contains(search_query, case=False, na=False))
         ]
 
-    # make a list of blockElementIds 
-    result = result_df['blockElementId'].tolist()
+    # Extract relevant fields and limit to first 100 results
+    results = result_df[['code', 'name', 'barcode', 'Score']].head(300).to_dict(orient='records')
 
-    return ResponseOut(data=result, message="success")
+    return templates.TemplateResponse("index.html", {"request": request, "results": results, "message": "Success"})
+
+
+@router.get("/query", response_class=HTMLResponse)
+async def search_endpoint(request: Request, q: str = None):
+    if q:
+        search_query = q.strip()
+    else:
+        return templates.TemplateResponse("index.html", {"request": request, "results": None, "message": "Empty field"})
+
+    # Search logic
+    if not search_query.isdigit():
+        # print(simple_search(search_query, df))
+        zero_df = simple_search(search_query, df)
+        first_df = search_with_fuzzy(search_query, df)
+        second_df = search_with_fuzzy(convert_layout(search_query), df)
+        third_df = search_with_fuzzy(transliterate(search_query), df)
+        fourth_df = search_with_fuzzy(transliterate(convert_layout(search_query)), df)
+
+        result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df))
+    else:
+        search_query = str(int(search_query))
+        result_df = df[
+            (df['code'].astype(str).str.contains(search_query, case=False, na=False)) |
+            (df['name'].astype(str).str.contains(search_query, case=False, na=False)) |
+            (df['barcode'].astype(str).str.contains(search_query, case=False, na=False))
+        ]
+
+    # Extract relevant fields and limit to first 100 results
+    results = [item['blockElementId'] for item in result_df.to_dict(orient='records')]
+    print(results[:5])
+
+    response_data = {
+        "message": "ok",
+        "data": results
+    }
+
+    return JSONResponse(content=response_data)
