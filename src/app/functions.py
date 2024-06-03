@@ -41,22 +41,41 @@ def convert_layout(text):
 
 
 """Divide into letters and transliterate"""
+# def custom_transliterate(text, transliteration_dict):
+#     result = []
+#     i = 0
+#     while i < len(text):
+#         current_char = text[i]
+#         next_chars_3 = text[i:i + 3]  # Check for three-character combinations
+#         next_chars_2 = text[i:i + 2]  # Check for two-character combinations
+
+#         if next_chars_3 in transliteration_dict:
+#             result.append(transliteration_dict[next_chars_3])
+#             i += 3
+#         elif next_chars_2 in transliteration_dict:
+#             result.append(transliteration_dict[next_chars_2])
+#             i += 2
+#         else:
+#             result.append(transliteration_dict.get(current_char, current_char))
+#             i += 1
+#     return ''.join(result)
+
+
 def custom_transliterate(text, transliteration_dict):
     result = []
     i = 0
     while i < len(text):
-        current_char = text[i]
-        next_chars_3 = text[i:i + 3]  # Check for three-character combinations
-        next_chars_2 = text[i:i + 2]  # Check for two-character combinations
-
-        if next_chars_3 in transliteration_dict:
-            result.append(transliteration_dict[next_chars_3])
-            i += 3
-        elif next_chars_2 in transliteration_dict:
-            result.append(transliteration_dict[next_chars_2])
-            i += 2
-        else:
-            result.append(transliteration_dict.get(current_char, current_char))
+        match_found = False
+        # Check for all possible substrings starting from the longest
+        for length in range(min(len(text) - i, max(map(len, transliteration_dict.keys()))), 0, -1):
+            next_chars = text[i:i + length]
+            if next_chars in transliteration_dict:
+                result.append(transliteration_dict[next_chars])
+                i += length
+                match_found = True
+                break
+        if not match_found:
+            result.append(transliteration_dict.get(text[i], text[i]))
             i += 1
     return ''.join(result)
 
@@ -89,7 +108,15 @@ def search_with_fuzzy(search_query, dataframe, column_name='name', threshold=65)
     matched_values = [match[0] for match in filtered_matches]
     scores = [match[1] - 1 for match in filtered_matches]
 
-    result_df = pd.merge(pd.DataFrame({'name': matched_values, 'Score': scores}), dataframe, on='name', how='inner')
+
+    # Ensure the 'name' columns are of type str before merging
+    temp_df = pd.DataFrame({'name': matched_values, 'Score': scores})
+    temp_df['name'] = temp_df['name'].astype(str)
+    dataframe['name'] = dataframe['name'].astype(str)
+
+    # Merge the DataFrames on the 'name' column
+    result_df = pd.merge(temp_df, dataframe, on='name', how='inner')
+    # result_df = pd.merge(pd.DataFrame({'name': matched_values, 'Score': scores}), dataframe, on='name', how='inner')
 
     return result_df
 
@@ -97,7 +124,7 @@ def search_with_fuzzy(search_query, dataframe, column_name='name', threshold=65)
 def simple_search(search_query, dataframe):
     # print(search_query)
     result = dataframe[dataframe['name'].str.contains(fr'\b{search_query}\b', case=False, na=False)].copy()
-    result['Score'] = 100  # Add 'Score' column with value 101
+    result['Score'] = 100  # Add 'Score' column with value 100
     result['Score'] = result['Score'].astype(int)  # Ensure 'Score' column is of integer type
     return result
 

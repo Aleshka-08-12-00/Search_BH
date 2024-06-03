@@ -33,6 +33,10 @@ russian_to_english_transliteration_dict = {
     'ю': 'yu',
     'я': 'ya',
     'хай': 'high',
+    'адвансит': 'Advanced',
+    'диа': 'dia',
+    'лайт': 'light',
+    'прозрачный': 'clear'
 }
 
 english_to_russian_transliteration_dict = {
@@ -65,5 +69,5 @@ english_to_russian_transliteration_dict = {
     'sch': 'щ',
     'y': 'ы',
     'yu': 'ю',
-    'ya': 'я',
+    'ya': 'я'
 }
