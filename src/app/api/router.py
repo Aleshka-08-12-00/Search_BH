@@ -53,14 +53,13 @@ async def search_endpoint(request: Request, q: str = None, producerids: str = No
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required.")
     
     elif producerids is None:
-        raise HTTPException(status_code=400, detail="Query parameter 'user' is required.")
+        df_filtered = df
     
     else:
         search_query = q.strip()
         producer_ids = [int(num) for num in producerids.split(',')]
-
     
-    df_filtered = df[df['producerid'].isin(producer_ids)]
+        df_filtered = df[df['producerid'].isin(producer_ids)]
 
     # Search logic
     if not search_query.isdigit():
@@ -72,13 +71,21 @@ async def search_endpoint(request: Request, q: str = None, producerids: str = No
         fourth_df = search_with_fuzzy(transliterate(convert_layout(search_query)), df_filtered)
 
         result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df))
-    else:
+        
+    elif len(search_query) > 2:
         search_query = str(int(search_query))
         result_df = df[
             (df['code'].astype(str).str.contains(search_query, case=False, na=False)) |
             (df['name'].astype(str).str.contains(search_query, case=False, na=False)) |
             (df['barcode'].astype(str).str.contains(search_query, case=False, na=False))
         ]
+        result_df['Score'] = 100
+    else:
+        search_query = str(int(search_query))
+        result_df = df[
+            (df['name'].astype(str).str.contains(search_query, case=False, na=False))
+        ]
+        result_df['Score'] = 100
 
     # Extract relevant fields and limit to first 100 results
     results = [item['id'] for item in result_df.head(96).to_dict(orient='records')]
