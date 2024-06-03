@@ -36,7 +36,8 @@ russian_to_english_transliteration_dict = {
     'адвансит': 'Advanced',
     'диа': 'dia',
     'лайт': 'light',
-    'прозрачный': 'clear'
+    'прозрачный': 'clear',
+    '10ьь': '10mm'
 }
 
 english_to_russian_transliteration_dict = {
