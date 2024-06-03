@@ -54,6 +54,7 @@ async def search_endpoint(request: Request, q: str = None, producerids: str = No
     
     elif producerids is None:
         df_filtered = df
+        search_query = q.strip()
     
     else:
         search_query = q.strip()
