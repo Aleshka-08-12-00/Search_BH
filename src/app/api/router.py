@@ -12,6 +12,7 @@ templates = Jinja2Templates(directory="app/templates")
 async def index(request: Request):
     return templates.TemplateResponse("index.html", {"request": request})
 
+
 @router.get("/search", response_class=HTMLResponse)
 async def search_endpoint(request: Request, search: str = None):
     if search:
@@ -71,7 +72,7 @@ async def search_endpoint(request: Request, q: str = None):
         ]
 
     # Extract relevant fields and limit to first 100 results
-    results = [item['blockElementId'] for item in result_df.to_dict(orient='records')]
+    results = [item['id'] for item in result_df.head(99).to_dict(orient='records')]
     print(results[:5])
 
     response_data = {

@@ -113,8 +113,6 @@ def sort_dataframes(merged_df):
 
     merged_df.drop_duplicates(subset='blockElementId', inplace=True)
 
-    # print('hyi')
-
     # Sort the dataframe by the 'Score' column (adjust 'Score' to the actual column name)
     merged_df.sort_values(by='Score', inplace=True, ascending=False)
 
