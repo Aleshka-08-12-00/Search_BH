@@ -15,10 +15,12 @@ database_config = {
 connection = psycopg2.connect(**database_config)
 
 # Fetch data from the PostgreSQL table into a DataFrame
-query = "SELECT * FROM a_block_element_search WHERE name NOT LIKE '%Образец%' AND name NOT LIKE '%РЕКЛАМА%';"
+query = """SELECT id, name, code, "propsNoFilter" ->> 'barcode' as barcode, "props" ->> 'producer' as producerId FROM a_block_element WHERE name NOT LIKE '%Образец%' AND name NOT LIKE '%РЕКЛАМА%' name NOT LIKE '%ОБРАЗЕЦ%' AND CAST((props#>>'{beautyHouseCategory}') AS DOUBLE PRECISION) > 0
+and "blockId" = 1"""
+
 df = pd.read_sql_query(query, connection)
 
 # Save df to the file
-df.to_csv('my_data_file.csv', index=False)
+df.to_csv('./my_data_file.csv', index=False)
 
 print("updated")
