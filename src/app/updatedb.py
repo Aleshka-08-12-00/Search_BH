@@ -15,7 +15,12 @@ database_config = {
 connection = psycopg2.connect(**database_config)
 
 # Fetch data from the PostgreSQL table into a DataFrame
-query = """SELECT id, name, code, "propsNoFilter" ->> 'barcode' as barcode, "props" ->> 'producer' as producerId FROM a_block_element WHERE name NOT LIKE '%Образец%' AND name NOT LIKE '%РЕКЛАМА%' name NOT LIKE '%ОБРАЗЕЦ%' AND CAST((props#>>'{beautyHouseCategory}') AS DOUBLE PRECISION) > 0
+query = """SELECT id, name, code, "propsNoFilter" ->> 'barcode' as barcode, "props" ->> 'producer' as producerId 
+    FROM a_block_element 
+    WHERE name NOT LIKE '%Образец%' 
+        AND name NOT LIKE '%РЕКЛАМА%' 
+        AND name NOT LIKE '%ОБРАЗЕЦ%' 
+        AND CAST((props#>>'{beautyHouseCategory}') AS DOUBLE PRECISION) > 0
 and "blockId" = 1"""
 
 df = pd.read_sql_query(query, connection)
