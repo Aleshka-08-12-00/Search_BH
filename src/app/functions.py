@@ -111,7 +111,7 @@ def merge_and_sort_dataframes(df1, df2, df3, df4, df5):
 
 def sort_dataframes(merged_df):
 
-    merged_df.drop_duplicates(subset='blockElementId', inplace=True)
+    merged_df.drop_duplicates(subset='id', inplace=True)
 
     # Sort the dataframe by the 'Score' column (adjust 'Score' to the actual column name)
     merged_df.sort_values(by='Score', inplace=True, ascending=False)
