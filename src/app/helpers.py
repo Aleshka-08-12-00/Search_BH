@@ -37,7 +37,8 @@ russian_to_english_transliteration_dict = {
     'диа': 'dia',
     'лайт': 'light',
     'прозрачный': 'clear',
-    '10ьь': '10mm'
+    '10ьь': '10mm',
+    'керл': 'curl'
 }
 
 english_to_russian_transliteration_dict = {
