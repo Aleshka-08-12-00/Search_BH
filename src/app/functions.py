@@ -1,3 +1,4 @@
+import re
 import pandas as pd
 from fuzzywuzzy import fuzz, process
 from app.helpers import english_to_russian_transliteration_dict, russian_to_english_transliteration_dict
@@ -123,7 +124,7 @@ def search_with_fuzzy(search_query, dataframe, column_name='name', threshold=65)
 """ Simple search with no libs """
 def simple_search(search_query, dataframe):
     # print(search_query)
-    result = dataframe[dataframe['name'].str.contains(fr'\b{search_query}\b', case=False, na=False)].copy()
+    result = dataframe[dataframe['name'].str.contains(fr'\b{re.escape(search_query)}\b', case=False, na=False)].copy()
     result['Score'] = 100  # Add 'Score' column with value 100
     result['Score'] = result['Score'].astype(int)  # Ensure 'Score' column is of integer type
     return result
