@@ -5,7 +5,7 @@ import os
 
 database_config = {
     'host': '172.16.0.86',
-    'database': 'api',
+    'database': 'api_b2b',
     'user': 'api',
     'password': 'qazwsx12!@D',
     'port': '5432',
