@@ -1,7 +1,7 @@
 import re
 import pandas as pd
 from fuzzywuzzy import fuzz, process
-from app.helpers import english_to_russian_transliteration_dict, russian_to_english_transliteration_dict
+from app.helpers import english_to_russian_transliteration_dict, russian_to_english_transliteration_dict, top_product_list
 
 
 """Get language (ru\en) by input symbols"""
@@ -107,7 +107,7 @@ def search_with_fuzzy(search_query, dataframe, column_name='name', threshold=65)
 
     # Extract matched values and set Score to score minus one for everyone
     matched_values = [match[0] for match in filtered_matches]
-    scores = [match[1] - 1 for match in filtered_matches]
+    scores = [match[1] - 2 for match in filtered_matches]
 
 
     # Ensure the 'name' columns are of type str before merging
@@ -124,24 +124,43 @@ def search_with_fuzzy(search_query, dataframe, column_name='name', threshold=65)
 """ Simple search with no libs """
 def simple_search(search_query, dataframe):
     # print(search_query)
-    result = dataframe[dataframe['name'].str.contains(fr'\b{re.escape(search_query)}\b', case=False, na=False)].copy()
-    result['Score'] = 100  # Add 'Score' column with value 100
-    result['Score'] = result['Score'].astype(int)  # Ensure 'Score' column is of integer type
+    if search_query.isdigit():
+        result = dataframe[dataframe['name'].str.contains(fr'(?<![\d.])\b{search_query}\b(?![\d.])', case=False, na=False)].copy()
+    else:
+        result = dataframe[dataframe['name'].str.contains(fr'\b{re.escape(search_query)}\b', case=False, na=False)].copy()
+    result['Score'] = 100
+    result['Score'] = result['Score'].astype(int)
     return result
 
 
+"""Case, when got number 1 to 10 as search query"""
+def top_number_search(search_query, dataframe):
+    result_df = pd.DataFrame()
+    try:
+        search_query = int(search_query)
+        for search_query in range(1, 11):
+            if search_query in top_product_list:
+                print(f"Processing values for key {search_query}:")
+                for value in top_product_list[search_query]:
+                    result = dataframe[dataframe['name'].str.contains(fr'(/b{value}/b)')]
+                    result['Score'] = 101
+                    result['Score'] = result['Score'].astype(int)
+                    result_df.append(result, ignore_index=True)
+    except:
+        pass
+    return result_df
+
+
 """Merge all dataframes to get one result"""
-def merge_and_sort_dataframes(df1, df2, df3, df4, df5):
+def merge_and_sort_dataframes(*dataframes):
 
-    datasrames = [df1, df2, df3, df4, df5]
-    return pd.concat(datasrames, ignore_index=True)
+    whole_df = pd.concat(dataframes, ignore_index=True)
+    return whole_df
 
 
-def sort_dataframes(merged_df):
+def sort_dataframes(whole_df):
 
-    merged_df.drop_duplicates(subset='id', inplace=True)
+    whole_df.drop_duplicates(subset='id', inplace=True)
+    whole_df.sort_values(by='Score', inplace=True, ascending=False)
 
-    # Sort the dataframe by the 'Score' column (adjust 'Score' to the actual column name)
-    merged_df.sort_values(by='Score', inplace=True, ascending=False)
-
-    return merged_df
+    return whole_df
