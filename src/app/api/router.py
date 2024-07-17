@@ -1,7 +1,8 @@
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse
-from app.database import df
+from app.database import get_dataframe
+import pandas as pd
 from app.functions import search_with_fuzzy, convert_layout, transliterate, merge_and_sort_dataframes, sort_dataframes, simple_search
 
 
@@ -15,8 +16,9 @@ async def index(request: Request):
 
 @router.get("/search", response_class=HTMLResponse)
 async def search_endpoint(request: Request, search: str = None):
+    df = get_dataframe()
     if search:
-        search_query = search.strip()
+        search_query = search.strip().split(' ')[0]
         # print("search query = ", search_query)
     else:
         return templates.TemplateResponse("index.html", {"request": request, "results": None, "message": "Empty field"})
@@ -32,7 +34,20 @@ async def search_endpoint(request: Request, search: str = None):
         third_df = search_with_fuzzy(transliterate(search_query), df)
         fourth_df = search_with_fuzzy(transliterate(convert_layout(search_query)), df)
 
-        result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df))
+        pre_result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df))
+
+        fifth_df = pd.DataFrame()
+        try:
+            # print(search.strip().split(' ')[1])
+            fifth_df = pre_result_df[(pre_result_df['name'].astype(str).str.contains(str(search.strip().split(' ')[1]), case=False, na=False))]
+            fifth_df['Score'] = 102
+            # print(len(fifth_df))
+        except: 
+            pass
+
+        result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df, fifth_df))
+
+
         
     elif len(search_query) > 2:
         search_query = str(int(search_query))
@@ -59,15 +74,17 @@ async def search_endpoint(request: Request, search: str = None):
 @router.get("/query", response_class=HTMLResponse)
 async def search_endpoint(request: Request, q: str = None, producerids: str = None):
 
+    df = get_dataframe()
+
     if q is None:
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required.")
     
     elif producerids is None:
         df_filtered = df
-        search_query = q.strip()
+        search_query = q.strip().split(' ')[0]
     
     else:
-        search_query = q.strip()
+        search_query = q.strip().split(' ')[0]
         producer_ids = [int(num) for num in producerids.split(',')]
     
         df_filtered = df[df['producerid'].isin(producer_ids)]
@@ -81,7 +98,18 @@ async def search_endpoint(request: Request, q: str = None, producerids: str = No
         third_df = search_with_fuzzy(transliterate(search_query), df_filtered)
         fourth_df = search_with_fuzzy(transliterate(convert_layout(search_query)), df_filtered)
 
-        result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df))
+        pre_result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df))
+        # print(search.strip().split(' '))
+        fifth_df = pd.DataFrame()
+        try:
+            # print(search.strip().split(' ')[1])
+            fifth_df = pre_result_df[(pre_result_df['name'].astype(str).str.contains(str(q.strip().split(' ')[1]), case=False, na=False))]
+            fifth_df['Score'] = 102
+            # print(len(fifth_df))
+        except: 
+            # print('hui')
+
+        result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df, fifth_df))
         
     elif len(search_query) > 2:
         search_query = str(int(search_query))

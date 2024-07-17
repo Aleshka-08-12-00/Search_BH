@@ -160,7 +160,7 @@ def merge_and_sort_dataframes(*dataframes):
 
 def sort_dataframes(whole_df):
 
-    whole_df.drop_duplicates(subset='id', inplace=True)
     whole_df.sort_values(by='Score', inplace=True, ascending=False)
+    whole_df.drop_duplicates(subset='id', inplace=True)
 
     return whole_df
