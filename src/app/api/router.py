@@ -40,7 +40,7 @@ async def search_endpoint(request: Request, search: str = None):
         try:
             # print(search.strip().split(' ')[1])
             fifth_df = pre_result_df[(pre_result_df['name'].astype(str).str.contains(str(search.strip().split(' ')[1]), case=False, na=False))]
-            fifth_df['Score'] = 102
+            fifth_df['Score'] = fifth_df['Score'] + 20
             # print(len(fifth_df))
         except: 
             pass
@@ -104,10 +104,10 @@ async def search_endpoint(request: Request, q: str = None, producerids: str = No
         try:
             # print(search.strip().split(' ')[1])
             fifth_df = pre_result_df[(pre_result_df['name'].astype(str).str.contains(str(q.strip().split(' ')[1]), case=False, na=False))]
-            fifth_df['Score'] = 102
+            fifth_df['Score'] = fifth_df['Score'] + 20
             # print(len(fifth_df))
         except: 
-            # print('hui')
+            pass # print('hui')
 
         result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df, fifth_df))
         
