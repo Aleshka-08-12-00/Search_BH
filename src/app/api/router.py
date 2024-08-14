@@ -107,7 +107,7 @@ async def search_endpoint(request: Request, q: str = None, producerids: str = No
             fifth_df['Score'] = 102
             # print(len(fifth_df))
         except: 
-            # print('hui')
+            pass# print('hui')
 
         result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df, fifth_df))
         

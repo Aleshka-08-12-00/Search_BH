@@ -1,3 +1,3 @@
 #!/bin/bash
 
-docker restart fastapi-app
+docker restart search_api_fastapi-app_1 
