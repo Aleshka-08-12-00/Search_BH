@@ -15,8 +15,9 @@ database_config = {
 connection = psycopg2.connect(**database_config)
 
 # Fetch data from the PostgreSQL table into a DataFrame
-query = """SELECT id, name, code, "propsNoFilter" ->> 'barcode' as barcode, "props" ->> 'producer' as producerId 
-    FROM a_block_element 
+query = """SELECT b."id", name, code, "propsNoFilter" ->> 'barcode' as barcode, "props" ->> 'producer' as producerId 
+    FROM a_block_element AS b
+    INNER JOIN a_warehouse_remains AS w ON b."id" = w."productId" 
     WHERE name NOT LIKE '%Образец%' 
         AND name NOT LIKE '%РЕКЛАМА%' 
         AND name NOT LIKE '%ОБРАЗЕЦ%' 
