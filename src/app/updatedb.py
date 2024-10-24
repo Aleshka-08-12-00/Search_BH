@@ -22,6 +22,7 @@ query = """SELECT id, name, code, "propsNoFilter" ->> 'barcode' as barcode, "pro
         AND name NOT LIKE '%ОБРАЗЕЦ%' 
         AND CAST((props#>>'{beautyHouseCategory}') AS DOUBLE PRECISION) > 0
         AND props#>>'{isSellout}' IS NULL
+        AND active = true
 and "blockId" = 1"""
 
 df = pd.read_sql_query(query, connection)

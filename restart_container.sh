@@ -1,3 +1,7 @@
 #!/bin/bash
 
-docker restart search_api_fastapi-app_1 
+cd
+cd search_test/search_api
+docker-compose down
+docker-compose build
+docker-compose up -d

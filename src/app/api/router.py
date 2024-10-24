@@ -56,13 +56,13 @@ async def search_endpoint(request: Request, search: str = None):
             (df['name'].astype(str).str.contains(search_query, case=False, na=False)) |
             (df['barcode'].astype(str).str.contains(search_query, case=False, na=False))
         ]
-        result_df['Score'] = 99
+        result_df['Score'] = 120
     else:
         search_query = str(int(search_query))
         result_df = df[
             (df['name'].astype(str).str.contains(search_query, case=False, na=False))
         ]
-        result_df['Score'] = 99
+        result_df['Score'] = 120
 
 
     # Extract relevant fields and limit to first 100 results
@@ -108,7 +108,6 @@ async def search_endpoint(request: Request, q: str = None, producerids: str = No
             # print(len(fifth_df))
         except: 
             pass# print('hui')
-            pass # print('hui')
 
         result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df, fifth_df))
         
@@ -119,13 +118,13 @@ async def search_endpoint(request: Request, q: str = None, producerids: str = No
             (df['name'].astype(str).str.contains(search_query, case=False, na=False)) |
             (df['barcode'].astype(str).str.contains(search_query, case=False, na=False))
         ]
-        result_df['Score'] = 99
+        result_df['Score'] = 120
     else:
         search_query = str(int(search_query))
         result_df = df[
             (df['name'].astype(str).str.contains(search_query, case=False, na=False))
         ]
-        result_df['Score'] = 99
+        result_df['Score'] = 120
 
     # Extract relevant fields and limit to first 100 results
     results = [item['id'] for item in result_df.head(96).to_dict(orient='records')]
