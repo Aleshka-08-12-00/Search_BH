@@ -135,3 +135,58 @@ async def search_endpoint(request: Request, q: str = None, producerids: str = No
     }
 
     return JSONResponse(content=response_data)
+
+
+@router.post("/batch_query")
+async def batch_query(request: Request):
+    payload = await request.json()
+    items = payload.get("items")
+    if not items or not isinstance(items, list):
+        raise HTTPException(status_code=400, detail="Body must include 'items' as a non-empty list.")
+    producerids = payload.get("producerids")
+    df = get_dataframe()
+    if producerids:
+        producer_ids = [int(num) for num in str(producerids).split(',') if str(num).strip().isdigit()]
+        df_filtered_base = df[df['producerid'].isin(producer_ids)]
+    else:
+        df_filtered_base = df
+    results = []
+    for q in items:
+        if not isinstance(q, str) or not q.strip():
+            results.append({"query": q, "data": [], "brands": {}, "categories": {}})
+            continue
+        search_query = q.strip().split(' ')[0]
+        df_filtered = df_filtered_base
+        if not search_query.isdigit():
+            zero_df = simple_search(search_query, df_filtered)
+            first_df = search_with_fuzzy(search_query, df_filtered)
+            second_df = search_with_fuzzy(convert_layout(search_query), df_filtered)
+            third_df = search_with_fuzzy(transliterate(search_query), df_filtered)
+            fourth_df = search_with_fuzzy(transliterate(convert_layout(search_query)), df_filtered)
+            pre_result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df))
+            fifth_df = pd.DataFrame()
+            parts = q.strip().split(' ')
+            if len(parts) > 1:
+                try:
+                    fifth_df = pre_result_df[(pre_result_df['name'].astype(str).str.contains(str(parts[1]), case=False, na=False))]
+                    fifth_df['Score'] = fifth_df['Score'] + 20
+                except:
+                    pass
+            result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df, fifth_df))
+        elif len(search_query) > 2:
+            search_query = str(int(search_query))
+            result_df = df_filtered[
+                (df_filtered['code'].astype(str).str.contains(search_query, case=False, na=False)) |
+                (df_filtered['name'].astype(str).str.contains(search_query, case=False, na=False)) |
+                (df_filtered['barcode'].astype(str).str.contains(search_query, case=False, na=False))
+            ].copy()
+            result_df['Score'] = 120
+        else:
+            search_query = str(int(search_query))
+            result_df = df_filtered[
+                (df_filtered['name'].astype(str).str.contains(search_query, case=False, na=False))
+            ].copy()
+            result_df['Score'] = 120
+        ids = [item['id'] for item in result_df.head(1).to_dict(orient='records')]
+        results.append({"query": q, "data": ids, "name": result_df.head(1).to_dict(orient='records')[0]['name']})
+    return JSONResponse(content={"message": "ok", "results": results})
