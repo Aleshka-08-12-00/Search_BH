@@ -71,7 +71,8 @@ english_to_russian_transliteration_dict = {
     'sch': 'щ',
     'y': 'ы',
     'yu': 'ю',
-    'ya': 'я'
+    'ya': 'я',
+    'x': 'кс'
 }
 
 top_product_list = {
