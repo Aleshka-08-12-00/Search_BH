@@ -153,7 +153,7 @@ async def batch_query(request: Request):
     results = []
     for q in items:
         if not isinstance(q, str) or not q.strip():
-            results.append({"query": q, "data": [], "brands": {}, "categories": {}})
+            results.append({"query": q, "data": None, "name": None})
             continue
         search_query = q.strip().split(' ')[0]
         df_filtered = df_filtered_base
@@ -168,8 +168,11 @@ async def batch_query(request: Request):
             parts = q.strip().split(' ')
             if len(parts) > 1:
                 try:
-                    fifth_df = pre_result_df[(pre_result_df['name'].astype(str).str.contains(str(parts[1]), case=False, na=False))]
-                    fifth_df['Score'] = fifth_df['Score'] + 20
+                    fifth_df = pre_result_df[
+                        pre_result_df['name'].astype(str).str.contains(str(parts[1]), case=False, na=False)
+                    ].copy()
+                    if not fifth_df.empty and 'Score' in fifth_df.columns:
+                        fifth_df = fifth_df.assign(Score=fifth_df['Score'] + 20)
                 except:
                     pass
             result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df, fifth_df))
@@ -187,6 +190,9 @@ async def batch_query(request: Request):
                 (df_filtered['name'].astype(str).str.contains(search_query, case=False, na=False))
             ].copy()
             result_df['Score'] = 120
-        ids = [item['id'] for item in result_df.head(1).to_dict(orient='records')]
-        results.append({"query": q, "data": ids, "name": result_df.head(1).to_dict(orient='records')[0]['name']})
+
+        top = result_df.head(1).to_dict(orient='records')
+        data = [top[0]['id']] if top else None
+        name = top[0]['name'] if top else None
+        results.append({"query": q, "data": data, "name": name})
     return JSONResponse(content={"message": "ok", "results": results})
