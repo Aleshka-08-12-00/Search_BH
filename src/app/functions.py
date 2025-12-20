@@ -1,166 +1,549 @@
+import os
 import re
+import json
+from pathlib import Path
+from typing import Optional, List, Dict
+
 import pandas as pd
-from fuzzywuzzy import fuzz, process
-from app.helpers import english_to_russian_transliteration_dict, russian_to_english_transliteration_dict, top_product_list
+from rapidfuzz import fuzz, process
+
+from app.helpers import (
+    english_to_russian_transliteration_dict,
+    russian_to_english_transliteration_dict,
+    top_product_list,
+)
+
+# ---------------------------------------------------------
+# Константы для бустов
+# ---------------------------------------------------------
+
+WORD_MATCH_BOOST = 5      # +5 за каждое совпадающее слово
+NUMBER_MATCH_BOOST = 20   # +20 за каждое совпадающее число
+
+# Путь к файлу синонимов (можно переопределить через переменную окружения)
+SYNONYMS_PATH = Path(os.getenv("SEARCH_SYNONYMS_PATH", "synonyms.json"))
+
+# Глобальный кеш синонимов + время последней модификации файла
+_synonyms_cache: Dict[str, List[str]] = {}
+_synonyms_mtime: Optional[float] = None
 
 
-"""Get language (ru\en) by input symbols"""
-def detect_language(text):
-    # Count the occurrences of Cyrillic and Latin characters
-    count_cyrillic = sum(1 for char in text if '\u0400' <= char <= '\u04FF')
-    count_latin = sum(1 for char in text if 'a' <= char <= 'z' or 'A' <= char <= 'Z')
+# ---------------------------------------------------------
+# Вспомогательные функции: язык / раскладка / транслит
+# ---------------------------------------------------------
 
-    # Compare the counts to determine the language
-    if count_cyrillic >= count_latin:
-        return 'ru'
-    else:
-        return 'en'
+def detect_language(text: str) -> str:
+    """Грубое определение языка: считаем кириллицу/латиницу."""
+    count_cyrillic = sum(1 for char in text if "\u0400" <= char <= "\u04FF")
+    count_latin = sum(1 for char in text if "a" <= char <= "z" or "A" <= char <= "Z")
+    return "ru" if count_cyrillic >= count_latin else "en"
 
 
-"""Change a keyboard layout"""
-def convert_layout(text):
-    russian_layout = 'йцукенгшщзхъфывапролджэячсмитьбюЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ'
-    english_layout = 'qwertyuiop[]asdfghjkl;\'zxcvbnm,.QWERTYUIOP{}ASDFGHJKL:"ZXCVBNM<>'
+def convert_layout(text: str) -> str:
+    """
+    Конвертация раскладки (русская клавиатура <-> английская),
+    не меняя сами символы (это не транслит).
+    """
+    russian_layout = "йцукенгшщзхъфывапролджэячсмитьбюЙЦУКЕНГШЩЗХЪФЫВАПРОЛДЖЭЯЧСМИТЬБЮ"
+    english_layout = "qwertyuiop[]asdfghjkl;'zxcvbnm,.QWERTYUIOP{}ASDFGHJKL:\"ZXCVBNM<>"
+
+    if not text:
+        return text
 
     language = detect_language(text)
-    # print('before layout changes: ', text)
-    if language == 'ru':
-        result = []
-        i = 0
-        while i < len(text):
-            if detect_language(text[i]) == 'en':
-                result.append(text[i])
-            elif detect_language(text[i]) == 'ru':
-                translation_table = str.maketrans(russian_layout, english_layout)
-                result.append(text[i].translate(translation_table))
-            i += 1
-        # print('after layout changes: ', result)
-        return ''.join(result)
-    elif language == 'en':
-        translation_table = str.maketrans(english_layout, russian_layout)
-        return text.translate(translation_table)
+
+    if language == "ru":
+        translation_table = str.maketrans(russian_layout, english_layout)
+        result_chars = []
+        for ch in text:
+            if "\u0400" <= ch <= "\u04FF":
+                result_chars.append(ch.translate(translation_table))
+            else:
+                result_chars.append(ch)
+        return "".join(result_chars)
+
+    translation_table = str.maketrans(english_layout, russian_layout)
+    return text.translate(translation_table)
 
 
-"""Divide into letters and transliterate"""
-# def custom_transliterate(text, transliteration_dict):
-#     result = []
-#     i = 0
-#     while i < len(text):
-#         current_char = text[i]
-#         next_chars_3 = text[i:i + 3]  # Check for three-character combinations
-#         next_chars_2 = text[i:i + 2]  # Check for two-character combinations
+def custom_transliterate(text: str, transliteration_dict: dict) -> str:
+    """
+    Транслит с поддержкой многосимвольных ключей словаря:
+    берём максимально возможную подстроку от текущей позиции.
+    """
+    if not text:
+        return text
 
-#         if next_chars_3 in transliteration_dict:
-#             result.append(transliteration_dict[next_chars_3])
-#             i += 3
-#         elif next_chars_2 in transliteration_dict:
-#             result.append(transliteration_dict[next_chars_2])
-#             i += 2
-#         else:
-#             result.append(transliteration_dict.get(current_char, current_char))
-#             i += 1
-#     return ''.join(result)
-
-
-def custom_transliterate(text, transliteration_dict):
     result = []
     i = 0
+    max_key_len = max(map(len, transliteration_dict.keys())) if transliteration_dict else 0
+
     while i < len(text):
         match_found = False
-        # Check for all possible substrings starting from the longest
-        for length in range(min(len(text) - i, max(map(len, transliteration_dict.keys()))), 0, -1):
-            next_chars = text[i:i + length]
-            if next_chars in transliteration_dict:
-                result.append(transliteration_dict[next_chars])
+        max_len_here = min(len(text) - i, max_key_len)
+        for length in range(max_len_here, 0, -1):
+            chunk = text[i : i + length]
+            if chunk in transliteration_dict:
+                result.append(transliteration_dict[chunk])
                 i += length
                 match_found = True
                 break
         if not match_found:
             result.append(transliteration_dict.get(text[i], text[i]))
             i += 1
-    return ''.join(result)
+
+    return "".join(result)
 
 
-"""Translate to another language"""
-def transliterate(text):
-    detected_language = detect_language(text.lower())
-
-    if detected_language == 'ru':
-        return custom_transliterate(text.lower(), russian_to_english_transliteration_dict)
-    elif detected_language == 'en':
-        return custom_transliterate(text.lower(), english_to_russian_transliteration_dict)
-    else:
+def transliterate(text: Optional[str]) -> Optional[str]:
+    """Авто-определение направления транслита (ru->en или en->ru)."""
+    if not isinstance(text, str) or not text:
         return None
 
+    lowered = text.lower()
+    language = detect_language(lowered)
 
-"""Search in dataframe with mistakes"""
-def search_with_fuzzy(search_query, dataframe, column_name='name', threshold=65):
+    if language == "ru":
+        return custom_transliterate(lowered, russian_to_english_transliteration_dict)
+    elif language == "en":
+        return custom_transliterate(lowered, english_to_russian_transliteration_dict)
+    return None
 
+
+# ---------------------------------------------------------
+# Синонимы: авто-перезагрузка при изменении файла
+# ---------------------------------------------------------
+
+def _load_synonyms() -> Dict[str, List[str]]:
+    """
+    Загружаем словарь синонимов из JSON-файла с кешированием по времени
+    модификации. Формат файла:
+
+    {
+      "matrix": ["socolor", "super sync"],
+      "бабки": "деньги"
+    }
+
+    Можно править файл на лету: при изменении mtime кеш будет обновлён.
+    """
+    global _synonyms_cache, _synonyms_mtime
+
+    path = SYNONYMS_PATH
+
+    # файла нет — очищаем кеш и возвращаем пустой словарь
+    if not path.is_file():
+        _synonyms_cache = {}
+        _synonyms_mtime = None
+        return _synonyms_cache
+
+    try:
+        mtime = path.stat().st_mtime
+    except Exception:
+        # если не получилось прочитать mtime, оставляем старый кеш
+        return _synonyms_cache
+
+    # файл не менялся — возвращаем кеш
+    if _synonyms_mtime is not None and mtime == _synonyms_mtime:
+        return _synonyms_cache
+
+    # файл изменился или загружаем первый раз
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        # если JSON битый — не роняем поиск, остаёмся на старом кеше
+        return _synonyms_cache
+
+    synonyms: Dict[str, List[str]] = {}
+    for key, value in raw.items():
+        key_l = str(key).lower().strip()
+        if not key_l:
+            continue
+
+        if isinstance(value, str):
+            synonyms[key_l] = [value.lower().strip()]
+        elif isinstance(value, (list, tuple, set)):
+            synonyms[key_l] = [
+                str(v).lower().strip() for v in value if str(v).strip()
+            ]
+
+    _synonyms_cache = synonyms
+    _synonyms_mtime = mtime
+    return _synonyms_cache
+
+
+
+def apply_synonyms_to_query(query: str) -> str:
+    """
+    Расширяем запрос синонимами.
+
+    Пример synonyms.json:
+    {
+      "matrix": ["socolor", "super sync"],
+      "бабки": "деньги"
+    }
+
+    "matrix 7N" -> "matrix socolor super sync 7N"
+    "бабки" -> "бабки деньги"
+    """
+    if not isinstance(query, str):
+        return ""
+    query = query.strip()
+    if not query:
+        return ""
+
+    synonyms = _load_synonyms()
+    if not synonyms:
+        return query
+
+    tokens = re.split(r"\s+", query)
+    result_tokens: List[str] = []
+
+    for token in tokens:
+        t_low = token.lower()
+        if t_low in synonyms and synonyms[t_low]:
+            alts = synonyms[t_low]
+            expanded = [token]  # оставляем оригинальное слово
+            for alt in alts:
+                if alt not in expanded:
+                    expanded.append(alt)
+            result_tokens.extend(expanded)
+        else:
+            result_tokens.append(token)
+
+    return " ".join(result_tokens)
+
+
+def normalize_query(raw_query: str) -> str:
+    """
+    Нормализация текста запроса:
+    - trim
+    - убираем лишнюю пунктуацию (оставляем только буквы/цифры/пробелы/точку)
+      SoColor: 6RC -> SoColor 6RC
+    - схлопываем пробелы
+
+    СИНОНИМЫ здесь НЕ применяем — они обрабатываются отдельно в search_dataframe.
+    """
+    if not isinstance(raw_query, str):
+        return ""
+    q = raw_query.strip()
+    if not q:
+        return ""
+
+    # оставляем только \w, пробелы и '.' (для оттенков 10.23 и т.п.)
+    q = re.sub(r"[^\w\s\.]+", " ", q)
+    q = re.sub(r"\s+", " ", q)
+
+    return q
+
+
+# ---------------------------------------------------------
+# Базовые поисковые функции (RapidFuzz + простое совпадение)
+# ---------------------------------------------------------
+
+def search_with_fuzzy(
+    search_query: str,
+    dataframe: pd.DataFrame,
+    column_name: str = "name",
+    threshold: int = 40,   # было 65, делаем мягче
+) -> pd.DataFrame:
+    """
+    Fuzzy-поиск по RapidFuzz с учётом многословных запросов.
+
+    Используем fuzz.token_set_ratio:
+    - игнорирует порядок слов
+    - устойчив к "лишним" словам
+
+    И запрос, и значения колонки приводим к lower(),
+    чтобы "6rc" совпадал с "6RC", "SoColor" с "socolor" и т.п.
+    """
     if not isinstance(search_query, str):
-        return pd.DataFrame()
+        return pd.DataFrame(columns=list(dataframe.columns) + ["Score"])
 
-    # Use fuzzywuzzy process.extract to find matches with a similarity threshold
-    matches = process.extract(search_query, dataframe[column_name], limit=len(dataframe), scorer=fuzz.partial_ratio)
+    q = search_query.strip().lower()
+    if not q:
+        return pd.DataFrame(columns=list(dataframe.columns) + ["Score"])
 
-    # Filter matches based on the threshold
-    filtered_matches = [match for match in matches if match[1] >= threshold]
+    if column_name not in dataframe.columns:
+        return pd.DataFrame(columns=list(dataframe.columns) + ["Score"])
 
-    # Extract matched values and set Score to score minus one for everyone
-    matched_values = [match[0] for match in filtered_matches]
-    scores = [match[1] - 2 for match in filtered_matches]
+    # главное отличие — .str.lower()
+    col_values = dataframe[column_name].astype(str).str.lower().tolist()
 
+    matches = process.extract(
+        q,
+        col_values,
+        scorer=fuzz.token_set_ratio,
+        score_cutoff=threshold,
+        limit=None,
+    )
 
-    # Ensure the 'name' columns are of type str before merging
-    temp_df = pd.DataFrame({'name': matched_values, 'Score': scores})
-    temp_df['name'] = temp_df['name'].astype(str)
-    dataframe['name'] = dataframe['name'].astype(str)
+    if not matches:
+        return pd.DataFrame(columns=list(dataframe.columns) + ["Score"])
 
-    # Merge the DataFrames on the 'name' column
-    result_df = pd.merge(temp_df, dataframe, on='name', how='inner')
-    # result_df = pd.merge(pd.DataFrame({'name': matched_values, 'Score': scores}), dataframe, on='name', how='inner')
+    indices = [m[2] for m in matches]
+    scores = [m[1] for m in matches]
+
+    result_df = dataframe.iloc[indices].copy()
+    result_df["Score"] = [int(s) for s in scores]
 
     return result_df
 
-""" Simple search with no libs """
-def simple_search(search_query, dataframe):
-    # print(search_query)
-    if search_query.isdigit():
-        result = dataframe[dataframe['name'].str.contains(fr'(?<![\d.])\b{search_query}\b(?![\d.])', case=False, na=False)].copy()
+
+def simple_search(search_query: str, dataframe: pd.DataFrame) -> pd.DataFrame:
+    """
+    Простой поиск по полному слову в name (без fuzzy):
+    - для чисел матчим как отдельный токен, а не часть другой цифры.
+    """
+    if not isinstance(search_query, str):
+        return pd.DataFrame(columns=list(dataframe.columns) + ["Score"])
+
+    q = search_query.strip()
+    if not q or "name" not in dataframe.columns:
+        return pd.DataFrame(columns=list(dataframe.columns) + ["Score"])
+
+    name_series = dataframe["name"].astype(str)
+
+    if q.isdigit():
+        pattern = fr"(?<![\d.])\b{q}\b(?![\d.])"
+        mask = name_series.str.contains(pattern, case=False, na=False, regex=True)
     else:
-        result = dataframe[dataframe['name'].str.contains(fr'\b{re.escape(search_query)}\b', case=False, na=False)].copy()
-    result['Score'] = 100
-    result['Score'] = result['Score'].astype(int)
+        pattern = fr"\b{re.escape(q)}\b"
+        mask = name_series.str.contains(pattern, case=False, na=False, regex=True)
+
+    result = dataframe[mask].copy()
+    if result.empty:
+        return pd.DataFrame(columns=list(dataframe.columns) + ["Score"])
+
+    result["Score"] = 100
+    result["Score"] = result["Score"].astype(int)
     return result
 
 
-"""Case, when got number 1 to 10 as search query"""
-def top_number_search(search_query, dataframe):
-    result_df = pd.DataFrame()
+def top_number_search(search_query: str, dataframe: pd.DataFrame) -> pd.DataFrame:
+    """
+    Поиск по "топовым" оттенкам 1..10 (если используешь).
+    """
+    result_df = pd.DataFrame(columns=list(dataframe.columns) + ["Score"])
     try:
-        search_query = int(search_query)
-        for search_query in range(1, 11):
-            if search_query in top_product_list:
-                print(f"Processing values for key {search_query}:")
-                for value in top_product_list[search_query]:
-                    result = dataframe[dataframe['name'].str.contains(fr'(/b{value}/b)')]
-                    result['Score'] = 101
-                    result['Score'] = result['Score'].astype(int)
-                    result_df.append(result, ignore_index=True)
-    except:
-        pass
-    return result_df
+        num = int(search_query)
+    except Exception:
+        return result_df
+
+    if num not in top_product_list:
+        return result_df
+
+    frames = []
+    for value in top_product_list[num]:
+        mask = dataframe["name"].astype(str).str.contains(
+            fr"\b{re.escape(value)}\b", case=False, na=False
+        )
+        tmp = dataframe[mask].copy()
+        if tmp.empty:
+            continue
+        tmp["Score"] = 101
+        tmp["Score"] = tmp["Score"].astype(int)
+        frames.append(tmp)
+
+    if not frames:
+        return result_df
+
+    return pd.concat(frames, ignore_index=True)
 
 
-"""Merge all dataframes to get one result"""
-def merge_and_sort_dataframes(*dataframes):
+def merge_and_sort_dataframes(*dataframes: pd.DataFrame) -> pd.DataFrame:
+    """Безопасный concat нескольких результатов."""
+    frames = [df for df in dataframes if isinstance(df, pd.DataFrame) and not df.empty]
+    if not frames:
+        return pd.DataFrame()
+    return pd.concat(frames, ignore_index=True)
 
-    whole_df = pd.concat(dataframes, ignore_index=True)
-    return whole_df
+
+def sort_dataframes(df: pd.DataFrame) -> pd.DataFrame:
+    """Сортировка по Score + удаление дублей по id (если есть)."""
+    if df is None or df.empty:
+        return pd.DataFrame(columns=getattr(df, "columns", []))
+
+    result = df.copy()
+    if "Score" in result.columns:
+        result["Score"] = result["Score"].astype(int)
+        result.sort_values(by="Score", ascending=False, inplace=True)
+
+    if "id" in result.columns:
+        result.drop_duplicates(subset="id", inplace=True)
+
+    return result
 
 
-def sort_dataframes(whole_df):
+# ---------------------------------------------------------
+# Бусты по совпадениям слов и чисел из исходного запроса
+# ---------------------------------------------------------
 
-    whole_df.sort_values(by='Score', inplace=True, ascending=False)
-    whole_df.drop_duplicates(subset='id', inplace=True)
+def apply_token_boosts(
+    df: pd.DataFrame,
+    raw_query: str,
+    name_column: str = "name",
+) -> pd.DataFrame:
+    """
+    Добавляем бонусы к Score:
+    - за каждое совпадающее слово: WORD_MATCH_BOOST
+    - за каждое совпадающее число: NUMBER_MATCH_BOOST
+    """
+    if df is None or df.empty:
+        return df
 
-    return whole_df
+    if not isinstance(raw_query, str) or not raw_query.strip():
+        return df
+
+    if name_column not in df.columns:
+        return df
+
+    text = raw_query.lower()
+    tokens = re.findall(r"\w+", text, flags=re.UNICODE)
+    if not tokens:
+        return df
+
+    numbers = {t for t in tokens if t.isdigit()}
+    words = [t for t in tokens if not t.isdigit()]
+
+    def calc_bonus(name: str) -> int:
+        if not isinstance(name, str):
+            name_str = str(name)
+        else:
+            name_str = name
+        name_low = name_str.lower()
+
+        word_hits = 0
+        for w in words:
+            if re.search(r"\b" + re.escape(w) + r"\b", name_low):
+                word_hits += 1
+
+        num_hits = 0
+        for n in numbers:
+            if re.search(r"\b" + re.escape(n) + r"\b", name_low):
+                num_hits += 1
+
+        return word_hits * WORD_MATCH_BOOST + num_hits * NUMBER_MATCH_BOOST
+
+    result = df.copy()
+    if "Score" not in result.columns:
+        result["Score"] = 0
+
+    result["Score"] = result["Score"].astype(int) + result[name_column].map(calc_bonus)
+
+    return result
+
+
+# ---------------------------------------------------------
+# Единая точка поиска по DataFrame
+# ---------------------------------------------------------
+
+def search_dataframe(df: pd.DataFrame, raw_query: str) -> pd.DataFrame:
+    """
+    Общая логика:
+    - нормализуем запрос (обрезка, чистка пунктуации)
+    - если первый токен не число:
+        * строим несколько вариантов запроса (с учётом синонимов)
+          напр. "Matrix 6RC" -> ["Matrix 6RC", "socolor 6RC", "super sync 6RC"]
+        * для каждого варианта запускаем fuzzy
+        * добавляем бусты за попадание слов/чисел
+    - если первый токен число:
+        * ищем по code/name/barcode или по числу в названии
+    """
+    if df is None or df.empty:
+        return pd.DataFrame(columns=list(getattr(df, "columns", [])) + ["Score"])
+
+    q_norm = normalize_query(raw_query)
+    if not q_norm:
+        return pd.DataFrame(columns=list(df.columns) + ["Score"])
+
+    tokens = q_norm.split()
+    if not tokens:
+        return pd.DataFrame(columns=list(df.columns) + ["Score"])
+
+    first_token = tokens[0]
+
+    # ----- ТЕКСТОВАЯ ВЕТКА -----
+    if not first_token.isdigit():
+        # базовый жёсткий поиск по первому слову
+        zero_df = simple_search(first_token, df)
+
+        # базовые варианты для fuzzy
+        variants = set()
+        variants.add(q_norm)       # весь запрос
+        variants.add(first_token)  # только бренд/первое слово
+
+        # --- варианты с синонимами ---
+        synonyms = _load_synonyms()
+        tokens_lower = [t.lower() for t in tokens]
+
+        for i, t_low in enumerate(tokens_lower):
+            if t_low in synonyms and synonyms[t_low]:
+                for alt in synonyms[t_low]:
+                    # заменяем токен на синоним: Matrix 6RC -> socolor 6RC
+                    new_tokens = list(tokens)
+                    new_tokens[i] = alt
+                    alt_query = " ".join(new_tokens)
+                    variants.add(alt_query)
+
+                    # ещё можно искать просто по самому синониму отдельно
+                    variants.add(alt)
+
+        # раскладка / транслит для КАЖДОГО варианта
+        extra_variants = set()
+        for v in list(variants):
+            converted = convert_layout(v)
+            if converted and converted != v:
+                extra_variants.add(converted)
+
+            translit = transliterate(v)
+            if translit and translit != v:
+                extra_variants.add(translit)
+
+        variants |= extra_variants
+
+        # запускаем fuzzy для всех вариантов
+        fuzzy_frames = []
+        for v in variants:
+            fuzzy_df = search_with_fuzzy(v, df)
+            if not fuzzy_df.empty:
+                fuzzy_frames.append(fuzzy_df)
+
+        combined = merge_and_sort_dataframes(zero_df, *fuzzy_frames)
+
+        # бустим по всем словам/числам исходного НОРМАЛИЗОВАННОГО запроса
+        boosted = apply_token_boosts(combined, q_norm)
+        return sort_dataframes(boosted)
+
+    # ----- ЧИСЛОВАЯ ВЕТКА -----
+    try:
+        numeric_token = str(int(first_token))  # нормализуем ведущие нули
+    except ValueError:
+        return pd.DataFrame(columns=list(df.columns) + ["Score"])
+
+    if len(numeric_token) > 2:
+        # Похоже на код/штрихкод
+        mask = (
+            df.get("code", pd.Series([], dtype=str))
+            .astype(str)
+            .str.contains(numeric_token, case=False, na=False)
+            | df.get("name", pd.Series([], dtype=str))
+            .astype(str)
+            .str.contains(numeric_token, case=False, na=False)
+            | df.get("barcode", pd.Series([], dtype=str))
+            .astype(str)
+            .str.contains(numeric_token, case=False, na=False)
+        )
+        result_df = df[mask].copy()
+    else:
+        # Короткое число — скорее номер оттенка в названии
+        if "name" not in df.columns:
+            return pd.DataFrame(columns=list(df.columns) + ["Score"])
+        mask = df["name"].astype(str).str.contains(numeric_token, case=False, na=False)
+        result_df = df[mask].copy()
+
+    if result_df.empty:
+        return pd.DataFrame(columns=list(df.columns) + ["Score"])
+
+    result_df["Score"] = 120
+    return sort_dataframes(result_df)

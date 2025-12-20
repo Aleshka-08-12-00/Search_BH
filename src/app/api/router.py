@@ -1,198 +1,167 @@
+from typing import List, Dict, Optional
+
 from fastapi import APIRouter, HTTPException, Request
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, JSONResponse
-from app.database import get_dataframe
 import pandas as pd
-from app.functions import search_with_fuzzy, convert_layout, transliterate, merge_and_sort_dataframes, sort_dataframes, simple_search
+
+from app.database import get_dataframe
+from app.functions import search_dataframe
+
 
 
 router = APIRouter()
 templates = Jinja2Templates(directory="app/templates")
 
+
 @router.get("/", response_class=HTMLResponse)
 async def index(request: Request):
+    """Простой рут для HTML-страницы поиска."""
     return templates.TemplateResponse("index.html", {"request": request})
 
 
 @router.get("/search", response_class=HTMLResponse)
-async def search_endpoint(request: Request, search: str = None):
-    df = get_dataframe()
-    if search:
-        search_query = search.strip().split(' ')[0]
-        # print("search query = ", search_query)
-    else:
-        return templates.TemplateResponse("index.html", {"request": request, "results": None, "message": "Empty field"})
-    
-    # print(simple_search(search_query, df))
-
-    # Search logic
-    if not search_query.isdigit():
-        # print(simple_search(search_query, df))
-        zero_df = simple_search(search_query, df)
-        first_df = search_with_fuzzy(search_query, df)
-        second_df = search_with_fuzzy(convert_layout(search_query), df)
-        third_df = search_with_fuzzy(transliterate(search_query), df)
-        fourth_df = search_with_fuzzy(transliterate(convert_layout(search_query)), df)
-
-        pre_result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df))
-
-        fifth_df = pd.DataFrame()
-        try:
-            # print(search.strip().split(' ')[1])
-            fifth_df = pre_result_df[(pre_result_df['name'].astype(str).str.contains(str(search.strip().split(' ')[1]), case=False, na=False))]
-            fifth_df['Score'] = fifth_df['Score'] + 20
-            # print(len(fifth_df))
-        except: 
-            pass
-
-        result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df, fifth_df))
-
-
-        
-    elif len(search_query) > 2:
-        search_query = str(int(search_query))
-        result_df = df[
-            (df['code'].astype(str).str.contains(search_query, case=False, na=False)) |
-            (df['name'].astype(str).str.contains(search_query, case=False, na=False)) |
-            (df['barcode'].astype(str).str.contains(search_query, case=False, na=False))
-        ]
-        result_df['Score'] = 120
-    else:
-        search_query = str(int(search_query))
-        result_df = df[
-            (df['name'].astype(str).str.contains(search_query, case=False, na=False))
-        ]
-        result_df['Score'] = 120
-
-
-    # Extract relevant fields and limit to first 100 results
-    results = result_df[['code', 'name', 'barcode', 'Score']].head(300).to_dict(orient='records')
-
-    return templates.TemplateResponse("index.html", {"request": request, "results": results, "message": "Success"})
-
-
-@router.get("/query", response_class=HTMLResponse)
-async def search_endpoint(request: Request, q: str = None, producerids: str = None):
-
+async def search_endpoint(request: Request, search: Optional[str] = None):
+    """HTML-эндпойнт для поиска (форма на сайте)."""
     df = get_dataframe()
 
-    if q is None:
+    if not search or not search.strip():
+        return templates.TemplateResponse(
+            "index.html",
+            {
+                "request": request,
+                "results": None,
+                "message": "Empty field",
+            },
+        )
+
+    result_df = search_dataframe(df, search)
+
+    # финальный список полей в HTML
+    if result_df.empty:
+        results: List[Dict] = []
+    else:
+        cols = [c for c in ['code', 'name', 'barcode', 'Score'] if c in result_df.columns]
+        results = result_df[cols].head(300).to_dict(orient="records")
+
+    return templates.TemplateResponse(
+        "index.html",
+        {"request": request, "results": results, "message": "Success"},
+    )
+
+
+@router.get("/query", response_class=JSONResponse)
+async def query_endpoint(request: Request, q: Optional[str] = None, producerids: Optional[str] = None):
+    if q is None or not q.strip():
         raise HTTPException(status_code=400, detail="Query parameter 'q' is required.")
-    
-    elif producerids is None:
-        df_filtered = df
-        search_query = q.strip().split(' ')[0]
-    
-    else:
-        search_query = q.strip().split(' ')[0]
-        producer_ids = [int(num) for num in producerids.split(',')]
-    
-        df_filtered = df[df['producerid'].isin(producer_ids)]
 
-    # Search logic
-    if not search_query.isdigit():
-        # print(simple_search(search_query, df))
-        zero_df = simple_search(search_query, df_filtered)
-        first_df = search_with_fuzzy(search_query, df_filtered)
-        second_df = search_with_fuzzy(convert_layout(search_query), df_filtered)
-        third_df = search_with_fuzzy(transliterate(search_query), df_filtered)
-        fourth_df = search_with_fuzzy(transliterate(convert_layout(search_query)), df_filtered)
+    df = get_dataframe()
 
-        pre_result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df))
-        # print(search.strip().split(' '))
-        fifth_df = pd.DataFrame()
+    if producerids:
         try:
-            # print(search.strip().split(' ')[1])
-            fifth_df = pre_result_df[(pre_result_df['name'].astype(str).str.contains(str(q.strip().split(' ')[1]), case=False, na=False))]
-            fifth_df['Score'] = fifth_df['Score'] + 20
-            # print(len(fifth_df))
-        except: 
-            pass# print('hui')
+            producer_ids = [int(num) for num in producerids.split(",") if str(num).strip().isdigit()]
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid 'producerids' format.")
+        if "producerid" in df.columns:
+            df = df[df["producerid"].isin(producer_ids)]
 
-        result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df, fifth_df))
-        
-    elif len(search_query) > 2:
-        search_query = str(int(search_query))
-        result_df = df[
-            (df['code'].astype(str).str.contains(search_query, case=False, na=False)) |
-            (df['name'].astype(str).str.contains(search_query, case=False, na=False)) |
-            (df['barcode'].astype(str).str.contains(search_query, case=False, na=False))
-        ]
-        result_df['Score'] = 120
+    result_df = search_dataframe(df, q)
+
+    if result_df.empty:
+        ids = None
     else:
-        search_query = str(int(search_query))
-        result_df = df[
-            (df['name'].astype(str).str.contains(search_query, case=False, na=False))
-        ]
-        result_df['Score'] = 120
+        if "id" not in result_df.columns:
+            raise HTTPException(status_code=500, detail="Dataframe does not contain 'id' column.")
 
-    # Extract relevant fields and limit to first 100 results
-    results = [item['id'] for item in result_df.head(96).to_dict(orient='records')]
+        raw_ids = [item["id"] for item in result_df.to_dict(orient="records")]
 
-    response_data = {
-        "message": "ok",
-        "data": results
-    }
+        seen = set()
+        unique_ids = []
+        for x in raw_ids:
+            key = x
+            try:
+                key = int(x)
+            except Exception:
+                pass
+            if key in seen:
+                continue
+            seen.add(key)
+            unique_ids.append(key)
+            if len(unique_ids) >= 96:
+                break
 
-    return JSONResponse(content=response_data)
+        ids = unique_ids
+
+    return JSONResponse(content={"message": "ok", "data": ids})
 
 
 @router.post("/batch_query")
 async def batch_query(request: Request):
     payload = await request.json()
     items = payload.get("items")
+
     if not items or not isinstance(items, list):
-        raise HTTPException(status_code=400, detail="Body must include 'items' as a non-empty list.")
+        raise HTTPException(
+            status_code=400,
+            detail="Body must include 'items' as a non-empty list."
+        )
+
     producerids = payload.get("producerids")
+
     df = get_dataframe()
+
     if producerids:
-        producer_ids = [int(num) for num in str(producerids).split(',') if str(num).strip().isdigit()]
-        df_filtered_base = df[df['producerid'].isin(producer_ids)]
+        producer_ids = [
+            int(num)
+            for num in str(producerids).split(",")
+            if str(num).strip().isdigit()
+        ]
+        df_filtered_base = df[df["producerid"].isin(producer_ids)]
     else:
         df_filtered_base = df
+
     results = []
+
     for q in items:
         if not isinstance(q, str) or not q.strip():
             results.append({"query": q, "data": None, "name": None})
             continue
-        search_query = q.strip().split(' ')[0]
-        df_filtered = df_filtered_base
-        if not search_query.isdigit():
-            zero_df = simple_search(search_query, df_filtered)
-            first_df = search_with_fuzzy(search_query, df_filtered)
-            second_df = search_with_fuzzy(convert_layout(search_query), df_filtered)
-            third_df = search_with_fuzzy(transliterate(search_query), df_filtered)
-            fourth_df = search_with_fuzzy(transliterate(convert_layout(search_query)), df_filtered)
-            pre_result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df))
-            fifth_df = pd.DataFrame()
-            parts = q.strip().split(' ')
-            if len(parts) > 1:
-                try:
-                    fifth_df = pre_result_df[
-                        pre_result_df['name'].astype(str).str.contains(str(parts[1]), case=False, na=False)
-                    ].copy()
-                    if not fifth_df.empty and 'Score' in fifth_df.columns:
-                        fifth_df = fifth_df.assign(Score=fifth_df['Score'] + 20)
-                except:
-                    pass
-            result_df = sort_dataframes(merge_and_sort_dataframes(zero_df, first_df, second_df, third_df, fourth_df, fifth_df))
-        elif len(search_query) > 2:
-            search_query = str(int(search_query))
-            result_df = df_filtered[
-                (df_filtered['code'].astype(str).str.contains(search_query, case=False, na=False)) |
-                (df_filtered['name'].astype(str).str.contains(search_query, case=False, na=False)) |
-                (df_filtered['barcode'].astype(str).str.contains(search_query, case=False, na=False))
-            ].copy()
-            result_df['Score'] = 120
-        else:
-            search_query = str(int(search_query))
-            result_df = df_filtered[
-                (df_filtered['name'].astype(str).str.contains(search_query, case=False, na=False))
-            ].copy()
-            result_df['Score'] = 120
 
-        top = result_df.head(1).to_dict(orient='records')
-        data = [top[0]['id']] if top else None
-        name = top[0]['name'] if top else None
-        results.append({"query": q, "data": data, "name": name})
-    return JSONResponse(content={"message": "ok", "results": results})
+        # используем общий движок поиска с синонимами/фаззи/бустами
+        result_df = search_dataframe(df_filtered_base, q)
+
+        if result_df is None or result_df.empty:
+            data = None
+            name = None
+        else:
+            top_row = result_df.iloc[0]
+
+            top_id = None
+            if "id" in result_df.columns:
+                try:
+                    # приводим numpy.int64 -> обычный int
+                    top_id = int(top_row["id"])
+                except (TypeError, ValueError):
+                    top_id = None
+
+            data = [top_id] if top_id is not None else None
+
+            if "name" in result_df.columns:
+                name = str(top_row["name"])
+            else:
+                name = None
+
+        results.append(
+            {
+                "query": q,
+                "data": data,
+                "name": name,
+            }
+        )
+
+    return JSONResponse(
+        content={
+            "message": "ok",
+            "results": results,
+        }
+    )
