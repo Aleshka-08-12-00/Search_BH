@@ -21,6 +21,7 @@ WORD_MATCH_BOOST = 5       # +5 за каждое совпадающее сло�
 NUMBER_MATCH_BOOST = 20    # +20 за каждое совпадающее число
 PHRASE_MATCH_BOOST = 15    # +15 если весь запрос как подстрока в названии
 WORD_MISSING_PENALTY = 3   # -3 за каждое слово из запроса, которого нет в названии
+NUMBER_MISSING_PENALTY = 10  # -10 за каждое число из запроса, которого нет в названии
 
 STOP_WORDS = {
     "для",
@@ -457,6 +458,10 @@ def apply_token_boosts(
         penalty = 0
         if len(words) >= 2 and missing_words:
             penalty = missing_words * WORD_MISSING_PENALTY
+
+        missing_numbers = max(0, len(numbers) - num_hits)
+        if missing_numbers:
+            penalty += missing_numbers * NUMBER_MISSING_PENALTY
 
         phrase_bonus = 0
         if normalized_query and normalized_query in name_low:
