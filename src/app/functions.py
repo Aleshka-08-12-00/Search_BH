@@ -198,18 +198,25 @@ def _load_synonyms() -> Dict[str, List[str]]:
 
 
 
-def apply_synonyms_to_query(query: str) -> str:
+def _match_token_case(token: str, replacement: str) -> str:
+    if token.isupper():
+        return replacement.upper()
+    if token[:1].isupper() and token[1:].islower():
+        return replacement.capitalize()
+    return replacement
+
+
+def replace_synonyms_in_query(query: str) -> str:
     """
-    Расширяем запрос синонимами.
+    Заменяем слова на синонимы сразу при запросе.
 
     Пример synonyms.json:
     {
       "matrix": ["socolor", "super sync"],
-      "бабки": "деньги"
+      "shampoo": ["шампунь"]
     }
 
-    "matrix 7N" -> "matrix socolor super sync 7N"
-    "бабки" -> "бабки деньги"
+    "A Curl Can Dream Shampoo 300 мл" -> "A Curl Can Dream Шампунь 300 мл"
     """
     if not isinstance(query, str):
         return ""
@@ -227,12 +234,8 @@ def apply_synonyms_to_query(query: str) -> str:
     for token in tokens:
         t_low = token.lower()
         if t_low in synonyms and synonyms[t_low]:
-            alts = synonyms[t_low]
-            expanded = [token]  # оставляем оригинальное слово
-            for alt in alts:
-                if alt not in expanded:
-                    expanded.append(alt)
-            result_tokens.extend(expanded)
+            replacement = synonyms[t_low][0]
+            result_tokens.append(_match_token_case(token, replacement))
         else:
             result_tokens.append(token)
 
@@ -491,6 +494,7 @@ def search_dataframe(df: pd.DataFrame, raw_query: str) -> pd.DataFrame:
     """
     Общая логика:
     - нормализуем запрос (обрезка, чистка пунктуации)
+    - заменяем слова по synonyms.json
     - если первый токен не число:
         * строим несколько вариантов запроса (с учётом синонимов)
           напр. "Matrix 6RC" -> ["Matrix 6RC", "socolor 6RC", "super sync 6RC"]
@@ -503,6 +507,7 @@ def search_dataframe(df: pd.DataFrame, raw_query: str) -> pd.DataFrame:
         return pd.DataFrame(columns=list(getattr(df, "columns", [])) + ["Score"])
 
     q_norm = normalize_query(raw_query)
+    q_norm = replace_synonyms_in_query(q_norm)
     if not q_norm:
         return pd.DataFrame(columns=list(df.columns) + ["Score"])
 
