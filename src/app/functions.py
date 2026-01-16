@@ -17,8 +17,32 @@ from app.helpers import (
 # Константы для бустов
 # ---------------------------------------------------------
 
-WORD_MATCH_BOOST = 5      # +5 за каждое совпадающее слово
-NUMBER_MATCH_BOOST = 20   # +20 за каждое совпадающее число
+WORD_MATCH_BOOST = 5       # +5 за каждое совпадающее слово
+NUMBER_MATCH_BOOST = 20    # +20 за каждое совпадающее число
+PHRASE_MATCH_BOOST = 15    # +15 если весь запрос как подстрока в названии
+WORD_MISSING_PENALTY = 3   # -3 за каждое слово из запроса, которого нет в названии
+
+STOP_WORDS = {
+    "для",
+    "и",
+    "или",
+    "с",
+    "со",
+    "без",
+    "на",
+    "в",
+    "по",
+    "от",
+    "до",
+    "a",
+    "an",
+    "the",
+    "for",
+    "with",
+    "of",
+    "and",
+    "or",
+}
 
 # Путь к файлу синонимов (можно переопределить через переменную окружения)
 SYNONYMS_PATH = Path(os.getenv("SEARCH_SYNONYMS_PATH", "synonyms.json"))
@@ -270,10 +294,15 @@ def search_with_fuzzy(
     # главное отличие — .str.lower()
     col_values = dataframe[column_name].astype(str).str.lower().tolist()
 
+    tokens = q.split()
+    scorer = fuzz.token_set_ratio if len(tokens) <= 2 else fuzz.token_sort_ratio
+    if len(tokens) >= 3:
+        threshold = max(threshold, 55)
+
     matches = process.extract(
         q,
         col_values,
-        scorer=fuzz.token_set_ratio,
+        scorer=scorer,
         score_cutoff=threshold,
         limit=None,
     )
@@ -404,7 +433,8 @@ def apply_token_boosts(
         return df
 
     numbers = {t for t in tokens if t.isdigit()}
-    words = [t for t in tokens if not t.isdigit()]
+    words = [t for t in tokens if not t.isdigit() and t not in STOP_WORDS]
+    normalized_query = " ".join(tokens)
 
     def calc_bonus(name: str) -> int:
         if not isinstance(name, str):
@@ -423,7 +453,21 @@ def apply_token_boosts(
             if re.search(r"\b" + re.escape(n) + r"\b", name_low):
                 num_hits += 1
 
-        return word_hits * WORD_MATCH_BOOST + num_hits * NUMBER_MATCH_BOOST
+        missing_words = max(0, len(words) - word_hits)
+        penalty = 0
+        if len(words) >= 2 and missing_words:
+            penalty = missing_words * WORD_MISSING_PENALTY
+
+        phrase_bonus = 0
+        if normalized_query and normalized_query in name_low:
+            phrase_bonus = PHRASE_MATCH_BOOST
+
+        return (
+            word_hits * WORD_MATCH_BOOST
+            + num_hits * NUMBER_MATCH_BOOST
+            + phrase_bonus
+            - penalty
+        )
 
     result = df.copy()
     if "Score" not in result.columns:
