@@ -46,6 +46,11 @@ STOP_WORDS = {
     "or",
 }
 
+PRODUCT_TYPE_GROUPS = [
+    {"shampoo", "шампунь"},
+    {"conditioner", "кондиционер"},
+]
+
 # Путь к файлу синонимов (можно переопределить через переменную окружения)
 SYNONYMS_PATH = Path(os.getenv("SEARCH_SYNONYMS_PATH", "synonyms.json"))
 
@@ -492,6 +497,36 @@ def apply_token_boosts(
     return result
 
 
+def filter_by_requirements(
+    df: pd.DataFrame,
+    required_numbers: set,
+    required_type_groups: List[set],
+    name_column: str = "name",
+) -> pd.DataFrame:
+    if df is None or df.empty:
+        return df
+    if name_column not in df.columns:
+        return df
+    if not required_numbers and not required_type_groups:
+        return df
+
+    name_series = df[name_column].astype(str)
+    mask = pd.Series(True, index=df.index)
+
+    for number in required_numbers:
+        pattern = fr"(?<!\d){re.escape(number)}(?!\d)"
+        mask &= name_series.str.contains(pattern, case=False, na=False, regex=True)
+
+    for group in required_type_groups:
+        pattern = r"\b(" + "|".join(re.escape(t) for t in group) + r")\b"
+        mask &= name_series.str.contains(pattern, case=False, na=False, regex=True)
+
+    filtered = df[mask].copy()
+    if filtered.empty:
+        return df
+    return filtered
+
+
 # ---------------------------------------------------------
 # Единая точка поиска по DataFrame
 # ---------------------------------------------------------
@@ -570,6 +605,17 @@ def search_dataframe(df: pd.DataFrame, raw_query: str) -> pd.DataFrame:
                 fuzzy_frames.append(fuzzy_df)
 
         combined = merge_and_sort_dataframes(zero_df, *fuzzy_frames)
+
+        tokens_lower = [t.lower() for t in tokens]
+        required_numbers = {t for t in tokens_lower if t.isdigit()}
+        required_type_groups = [
+            group for group in PRODUCT_TYPE_GROUPS if group.intersection(tokens_lower)
+        ]
+        combined = filter_by_requirements(
+            combined,
+            required_numbers=required_numbers,
+            required_type_groups=required_type_groups,
+        )
 
         # бустим по всем словам/числам исходного НОРМАЛИЗОВАННОГО запроса
         boosted = apply_token_boosts(combined, q_norm)
