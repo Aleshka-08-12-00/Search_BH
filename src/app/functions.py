@@ -460,7 +460,7 @@ def apply_token_boosts(
 
         num_hits = 0
         for n in numbers:
-            if re.search(r"\b" + re.escape(n) + r"\b", name_low):
+            if re.search(r"(?<!\d)" + re.escape(n) + r"(?!\d)", name_low):
                 num_hits += 1
 
         missing_words = max(0, len(words) - word_hits)
@@ -567,6 +567,24 @@ def search_dataframe(df: pd.DataFrame, raw_query: str) -> pd.DataFrame:
         variants = set()
         variants.add(q_norm)       # весь запрос
         variants.add(first_token)  # только бренд/первое слово
+
+        units = {"мл", "ml", "л", "l", "г", "gr", "гр", "g", "кг", "kg"}
+        combined_tokens = []
+        i = 0
+        while i < len(tokens):
+            token = tokens[i]
+            if (
+                token.isdigit()
+                and i + 1 < len(tokens)
+                and tokens[i + 1].lower() in units
+            ):
+                combined_tokens.append(f"{token}{tokens[i + 1]}")
+                i += 2
+                continue
+            combined_tokens.append(token)
+            i += 1
+        if combined_tokens != tokens:
+            variants.add(" ".join(combined_tokens))
 
         # --- варианты с синонимами ---
         synonyms = _load_synonyms()
