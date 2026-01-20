@@ -1,8 +1,10 @@
 import os
 import re
 import json
+import time
+import urllib.request
 from pathlib import Path
-from typing import Optional, List, Dict
+from typing import Optional, List, Dict, Any
 
 import pandas as pd
 from rapidfuzz import fuzz, process
@@ -53,10 +55,13 @@ PRODUCT_TYPE_GROUPS = [
 
 # Путь к файлу синонимов (можно переопределить через переменную окружения)
 SYNONYMS_PATH = Path(os.getenv("SEARCH_SYNONYMS_PATH", "synonyms.json"))
+SYNONYMS_URL = os.getenv("SEARCH_SYNONYMS_URL", "https://nest.sellwin.by/ocr-ai-settings/all")
+SYNONYMS_TTL_SECONDS = int(os.getenv("SEARCH_SYNONYMS_TTL", "300"))
 
 # Глобальный кеш синонимов + время последней модификации файла
 _synonyms_cache: Dict[str, List[str]] = {}
 _synonyms_mtime: Optional[float] = None
+_synonyms_last_fetch: Optional[float] = None
 
 
 # ---------------------------------------------------------
@@ -145,10 +150,60 @@ def transliterate(text: Optional[str]) -> Optional[str]:
 # Синонимы: авто-перезагрузка при изменении файла
 # ---------------------------------------------------------
 
+def _normalize_synonyms(raw: Dict[str, Any]) -> Dict[str, List[str]]:
+    synonyms: Dict[str, List[str]] = {}
+    for key, value in raw.items():
+        key_l = str(key).lower().strip()
+        if not key_l:
+            continue
+
+        if isinstance(value, str):
+            values = [value]
+        elif isinstance(value, (list, tuple, set)):
+            values = list(value)
+        else:
+            continue
+
+        cleaned = [str(v).lower().strip() for v in values if str(v).strip()]
+        if not cleaned:
+            continue
+
+        existing = synonyms.setdefault(key_l, [])
+        for item in cleaned:
+            if item not in existing:
+                existing.append(item)
+
+    return synonyms
+
+
+def _extract_synonyms_payload(payload: Any) -> Dict[str, List[str]]:
+    candidates: List[Dict[str, Any]] = []
+    if isinstance(payload, dict):
+        if "synonyms" in payload and isinstance(payload["synonyms"], dict):
+            candidates.append(payload["synonyms"])
+        elif "synonyms" not in payload:
+            candidates.append(payload)
+    elif isinstance(payload, list):
+        for item in payload:
+            if isinstance(item, dict) and isinstance(item.get("synonyms"), dict):
+                candidates.append(item["synonyms"])
+
+    merged: Dict[str, List[str]] = {}
+    for candidate in candidates:
+        normalized = _normalize_synonyms(candidate)
+        for key, values in normalized.items():
+            existing = merged.setdefault(key, [])
+            for value in values:
+                if value not in existing:
+                    existing.append(value)
+
+    return merged
+
+
 def _load_synonyms() -> Dict[str, List[str]]:
     """
-    Загружаем словарь синонимов из JSON-файла с кешированием по времени
-    модификации. Формат файла:
+    Загружаем словарь синонимов из URL или JSON-файла с кешированием.
+    Формат файла:
 
     {
       "matrix": ["socolor", "super sync"],
@@ -156,15 +211,39 @@ def _load_synonyms() -> Dict[str, List[str]]:
     }
 
     Можно править файл на лету: при изменении mtime кеш будет обновлён.
+    При наличии URL (SEARCH_SYNONYMS_URL) словарь берётся оттуда с TTL.
     """
-    global _synonyms_cache, _synonyms_mtime
+    global _synonyms_cache, _synonyms_mtime, _synonyms_last_fetch
 
     path = SYNONYMS_PATH
+
+    if SYNONYMS_URL:
+        now = time.time()
+        if (
+            _synonyms_last_fetch is not None
+            and SYNONYMS_TTL_SECONDS > 0
+            and now - _synonyms_last_fetch < SYNONYMS_TTL_SECONDS
+        ):
+            return _synonyms_cache
+
+        try:
+            with urllib.request.urlopen(SYNONYMS_URL, timeout=10) as response:
+                payload = json.load(response)
+        except Exception:
+            if _synonyms_cache:
+                return _synonyms_cache
+        else:
+            synonyms = _extract_synonyms_payload(payload)
+            _synonyms_cache = synonyms
+            _synonyms_last_fetch = now
+            _synonyms_mtime = None
+            return _synonyms_cache
 
     # файла нет — очищаем кеш и возвращаем пустой словарь
     if not path.is_file():
         _synonyms_cache = {}
         _synonyms_mtime = None
+        _synonyms_last_fetch = None
         return _synonyms_cache
 
     try:
@@ -185,21 +264,9 @@ def _load_synonyms() -> Dict[str, List[str]]:
         # если JSON битый — не роняем поиск, остаёмся на старом кеше
         return _synonyms_cache
 
-    synonyms: Dict[str, List[str]] = {}
-    for key, value in raw.items():
-        key_l = str(key).lower().strip()
-        if not key_l:
-            continue
-
-        if isinstance(value, str):
-            synonyms[key_l] = [value.lower().strip()]
-        elif isinstance(value, (list, tuple, set)):
-            synonyms[key_l] = [
-                str(v).lower().strip() for v in value if str(v).strip()
-            ]
-
-    _synonyms_cache = synonyms
+    _synonyms_cache = _normalize_synonyms(raw)
     _synonyms_mtime = mtime
+    _synonyms_last_fetch = None
     return _synonyms_cache
 
 
